@@ -3,6 +3,7 @@ import os
 import time
 import psycopg2
 import resend
+import requests # Import the requests library
 from dotenv import load_dotenv
 
 # Load environment variables (useful for local testing)
@@ -15,44 +16,47 @@ if not DATABASE_URL:
     print("Error: DATABASE_URL environment variable not set.")
     exit(1)
 
-# Resend API Key
+# Resend API Key (still needed if make.com automation uses it via webhook)
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-if not RESEND_API_KEY:
-    print("Error: RESEND_API_KEY environment variable not set.")
-    exit(1)
+# We don't exit here if RESEND_API_KEY is not set, as the worker now triggers a webhook
+# and the webhook might handle the Resend API key itself.
 
-resend.api_key = RESEND_API_KEY
+resend.api_key = RESEND_API_KEY # Keep this line for compatibility, but it might not be used directly by the worker anymore
+
+# Make.com Webhook URL
+MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
+if not MAKE_WEBHOOK_URL:
+    print("Error: MAKE_WEBHOOK_URL environment variable not set.")
+    # Exit if webhook URL is not set, as this is now the primary action
+    exit(1)
 
 def send_incomplete_plan_email(user_email: str, user_id: str):
     """
-    Sends an email to a user who hasn't selected a plan.
+    Triggers a webhook to send an email to a user who hasn't selected a plan.
     """
     try:
-        result = resend.Emails.send(
-            {
-                "from": "FigScreen <no-reply@figscreen.com>",
-                "to": user_email,
-                "subject": "Complete Your Figscreen Setup",
-                "html": f"""
-                    <p>Hi there,</p>
-                    <p>We noticed you created an account with Figscreen but haven't selected a plan yet.</p>
-                    <p>Complete your setup to start using all the features!</p>
-                    <p>As a special offer, you can get 25% off any paid plan using the code: <strong>BETA20</strong></p>
-                    <p><a href="https://app.figscreen.com/dashboard">Choose Your Plan</a></p>
-                    <p>If you have any questions, feel free to reach out.</p>
-                    <p>Best regards,<br>Hmanshu Raikwar<br>Founder of Figscreen</p>
-                """
-            }
-        )
-        print(f"Email sent successfully to {user_email}: {result['id']}")
+        # Data to send to the webhook
+        payload = {
+            "user_id": user_id,
+            "user_email": user_email,
+            # You can add more data here if needed for your make.com scenario
+        }
+
+        # Send POST request to the make.com webhook URL
+        response = requests.post(MAKE_WEBHOOK_URL, json=payload)
+
+        # Check if the request was successful
+        response.raise_for_status()
+
+        print(f"Webhook triggered successfully for user {user_id} ({user_email}). Status Code: {response.status_code}")
         return True
-    except Exception as e:
-        print(f"Failed to send email to {user_email}: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to trigger webhook for user {user_id} ({user_email}): {e}")
         return False
 
 def process_unprocessed_events():
     """
-    Connects to the database, finds unprocessed events, sends emails, and updates records.
+    Connects to the database, finds unprocessed events, triggers webhook, and updates records.
     """
     conn = None
     try:
