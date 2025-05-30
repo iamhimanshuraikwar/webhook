@@ -2,7 +2,7 @@
 import os
 import time
 import psycopg2
-from resend import Resend
+import resend
 from dotenv import load_dotenv
 
 # Load environment variables (useful for local testing)
@@ -21,14 +21,14 @@ if not RESEND_API_KEY:
     print("Error: RESEND_API_KEY environment variable not set.")
     exit(1)
 
-resend = Resend(api_key=RESEND_API_KEY)
+resend.api_key = RESEND_API_KEY
 
 def send_incomplete_plan_email(user_email: str, user_id: str):
     """
     Sends an email to a user who hasn't selected a plan.
     """
     try:
-        result = resend.emails.send(
+        result = resend.Emails.send(
             {
                 "from": "FigScreen <no-reply@figscreen.com>",
                 "to": user_email,
@@ -65,7 +65,7 @@ def process_unprocessed_events():
             """
             SELECT id, user_id, email
             FROM user_events
-            WHERE event_type = 'no_plan_selected' AND email_sent = FALSE
+            WHERE event_type = 'no_plan_selected' AND processed = FALSE
             ORDER BY created_at ASC
             LIMIT 10 # Process in batches
             """
@@ -89,13 +89,13 @@ def process_unprocessed_events():
                 cur.execute(
                     """
                     UPDATE user_events
-                    SET email_sent = TRUE
+                    SET processed = TRUE
                     WHERE id = %s
                     """,
                     (event_id,)
                 )
                 conn.commit()
-                print(f"Marked event {event_id} as email_sent=TRUE.")
+                print(f"Marked event {event_id} as processed=TRUE.")
             else:
                  # Handle case where email sending failed - maybe log or retry later
                  print(f"Email failed to send for event {event_id}. Will not mark as sent.")
